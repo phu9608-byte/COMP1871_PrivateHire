@@ -231,20 +231,24 @@ Khi khởi động, container `backend` tự chạy `alembic upgrade head` rồi
 
 ```json
 {
+  "username": "an.nguyen",
   "email": "an.nguyen@example.com",
-  "password": "matkhau123",
+  "password": "matkhau12345",
   "full_name": "Nguyen Van An",
   "phone": "0901234567",
+  "marketing_consent": false,
   "role": "customer"
 }
 ```
 
 | Trường | Bắt buộc | Quy tắc |
 |---|---|---|
+| `username` | ✔ | 3–30 ký tự, chỉ chữ không dấu, số, `_` và `.`; tự chuyển về chữ thường; không được trùng |
 | `email` | ✔ | Đúng định dạng email, tự chuyển về chữ thường, không được trùng |
-| `password` | ✔ | Từ 8 ký tự, tối đa 72 byte, có ít nhất 1 chữ cái và 1 chữ số |
+| `password` | ✔ | **Từ 12 ký tự**, tối đa 72 byte; lưu dạng băm bcrypt, không bao giờ lưu bản gốc |
 | `full_name` | ✔ | 1–100 ký tự |
-| `phone` | | 8–15 chữ số, có thể bắt đầu bằng `+`; dấu cách/gạch ngang được tự bỏ; không được trùng |
+| `phone` | ✔ | 8–15 chữ số, có thể bắt đầu bằng `+`; dấu cách/gạch ngang được tự bỏ; không được trùng |
+| `marketing_consent` | | Đồng ý nhận email/tin nhắn ưu đãi – mặc định `false` (không tick) |
 | `role` | | `customer` (mặc định) hoặc `driver` |
 
 - Gửi `role: "admin"` hoặc thêm trường lạ (vd. `is_active`) → bị từ chối.
@@ -254,9 +258,109 @@ Khi khởi động, container `backend` tự chạy `alembic upgrade head` rồi
 
 | Mã | Ý nghĩa |
 |---|---|
-| `201` | Tạo thành công – trả về thông tin user (không bao giờ có mật khẩu) |
-| `409` | Email hoặc số điện thoại đã được sử dụng |
-| `422` | Dữ liệu không hợp lệ – xem `detail` để biết trường nào sai |
+| `201` | Tạo thành công – trả về thông tin user (không bao giờ có mật khẩu). Frontend chuyển sang trang đăng nhập |
+| `409` | `Ten dang nhap da duoc su dung` / `Email da duoc su dung` / `So dien thoai da duoc su dung` |
+| `422` | Dữ liệu không hợp lệ hoặc thiếu trường – xem `detail` để biết trường nào sai |
+
+**Đối chiếu Acceptance Criteria (user story Đăng ký):**
+
+| Acceptance Criteria | Làm ở đâu |
+|---|---|
+| Mọi trường bắt buộc, email và số điện thoại đúng định dạng | Backend (bảng trên) + frontend |
+| Email đã đăng ký bị từ chối kèm thông báo | Backend – `409` |
+| Mật khẩu ≥ 12 ký tự, kiểm tra cả ở server và trình duyệt, lưu dạng băm | Backend kiểm tra + bcrypt; frontend kiểm tra thêm |
+| Thành công thì chuyển sang trang đăng nhập | Frontend (khi nhận `201`) |
+| Ô đồng ý marketing không bắt buộc, mặc định không tick | Backend – `marketing_consent` mặc định `false`; frontend để ô không tick |
+| Link tới privacy notice ngắn | Frontend |
+
+### `POST /api/v1/auth/login` – Đăng nhập
+
+Đăng nhập bằng **email hoặc tên đăng nhập** (cùng một ô `login`) + mật khẩu.
+Có ký tự `@` → tìm theo email, không có → tìm theo username. Không phân biệt hoa thường.
+Mật khẩu được giữ **nguyên từng ký tự** (kể cả khoảng trắng) để password manager và dán mật khẩu hoạt động đúng.
+
+**Body:**
+
+```json
+{
+  "login": "an.nguyen",
+  "password": "matkhau12345"
+}
+```
+
+**Kết quả `200`:** body chứa thông tin user, **session ID chỉ nằm trong cookie**:
+
+```
+Set-Cookie: session_id=kX9f2...; HttpOnly; Path=/; SameSite=lax; Secure
+Cache-Control: no-store
+```
+
+```json
+{
+  "user": {
+    "id": "9183886b-...",
+    "username": "an.nguyen",
+    "email": "an.nguyen@example.com",
+    "full_name": "Nguyen Van An",
+    "phone": "0901234567",
+    "role": "customer",
+    "is_active": true,
+    "marketing_consent": false,
+    "created_at": "2026-11-07T13:56:00+07:00"
+  }
+}
+```
+
+| Mã | Ý nghĩa |
+|---|---|
+| `200` | Đúng thông tin – tạo phiên mới, gửi cookie `session_id` |
+| `401` | `Thong tin dang nhap khong dung` – sai email/username **hoặc** mật khẩu (không nói trường nào sai) |
+| `403` | `Tai khoan da bi khoa` – mật khẩu đúng nhưng `is_active = false` |
+| `422` | Thiếu trường hoặc có trường lạ |
+| `429` | `Dang nhap sai qua nhieu lan, thu lai sau 15 phut` – sai 5 lần trong 15 phút, tài khoản bị khoá 15 phút (kể cả nhập đúng) |
+
+### `GET /api/v1/auth/me` – Ai đang đăng nhập
+
+Không có body – trình duyệt **tự gửi cookie**. Trả `200` thông tin user, hoặc `401 "Chua dang nhap hoac phien da het han"`.
+Dashboard gọi API này **mỗi khi trang hiện ra** (kể cả khi bấm Back); nhận `401` thì chuyển về trang đăng nhập.
+
+### `POST /api/v1/auth/logout` – Đăng xuất
+
+Không có body. **Xoá phiên ở server** và xoá cookie, luôn trả `204 No Content` (kể cả khi chưa đăng nhập).
+Sau đó `/me` và mọi API cần đăng nhập trả `401` – kể cả khi ai đó đã chép được session ID cũ.
+
+### Phiên đăng nhập hoạt động thế nào
+
+```
+ĐĂNG NHẬP  /login đúng → tạo session ID ngẫu nhiên MỚI → lưu bảng sessions → gửi cookie session_id
+DÙNG       trình duyệt tự gửi cookie ở mọi request (JavaScript không đọc được – HttpOnly)
+           → server tìm session ID → còn trong 30 phút không hoạt động? → cho qua + gia hạn 30 phút
+           → không thấy / quá 30 phút → 401
+ĐĂNG XUẤT  /logout → xoá dòng trong sessions + xoá cookie → mọi request sau đó 401
+```
+
+| Phiên bị xoá khi | Ghi chú |
+|---|---|
+| Đăng xuất | Chỉ phiên của trình duyệt đó – máy khác vẫn đăng nhập |
+| 30 phút không hoạt động | Mỗi lần gọi API được gia hạn thêm 30 phút |
+| Đăng nhập lại trên cùng trình duyệt | Phiên cũ bị xoá, cấp session ID mới |
+| Xoá tài khoản | Database tự xoá (`ON DELETE CASCADE`) |
+| Đổi mật khẩu / admin khoá | **Chưa làm** – đã có sẵn hàm `auth_service.delete_all_sessions(db, user_id)` |
+
+> **Thử trên Swagger:** mở bằng `http://127.0.0.1:8000/docs` hoặc `http://localhost:8000/docs`
+> (trình duyệt coi 2 địa chỉ này là an toàn nên nhận cookie `Secure`). Gọi `/login` xong thì `/me` và `/logout`
+> tự có cookie – không cần bấm **Authorize**.
+
+**Đối chiếu Acceptance Criteria (user story Đăng nhập):**
+
+| Acceptance Criteria | Backend | Frontend |
+|---|---|---|
+| Email + mật khẩu đúng → mở dashboard khách hàng | `/login` trả `200` (nhận cả email lẫn username) | Chuyển sang dashboard |
+| Sai thông tin báo lỗi, không nói trường nào sai | Cùng một thông báo `401` | Hiện thông báo |
+| Đăng xuất kết thúc phiên, Back không mở lại dashboard | `/logout` xoá phiên; `Cache-Control: no-store`; `/me` trả `401` | Gọi `/me` mỗi khi dashboard hiện ra (cả sự kiện `pageshow`), `401` → về trang đăng nhập |
+| Sai 5 lần trong 15 phút → khoá 15 phút | Đếm theo tài khoản, trả `429` | Hiện thông báo |
+| Session ID mới khi đăng nhập, cookie HttpOnly + Secure, hết sau 30 phút không hoạt động | Đã làm | Không cần làm gì (trình duyệt tự lo cookie) |
+| Password manager và dán mật khẩu dùng được | Không cắt khoảng trắng mật khẩu | Không chặn paste, ô mật khẩu có `autocomplete="current-password"` |
 
 ---
 
@@ -267,13 +371,27 @@ Khi khởi động, container `backend` tự chạy `alembic upgrade head` rồi
 | Cột | Kiểu | Ghi chú |
 |---|---|---|
 | `id` | UUID | Khoá chính |
+| `username` | VARCHAR(30) | Unique, chữ thường – dùng để đăng nhập |
 | `email` | VARCHAR(255) | Unique |
 | `password_hash` | VARCHAR(255) | Mật khẩu đã mã hoá bcrypt (`$2b$12$...`) |
 | `full_name` | VARCHAR(100) | |
-| `phone` | VARCHAR(20) | Unique, có thể NULL |
+| `phone` | VARCHAR(20) | Unique, bắt buộc |
 | `role` | ENUM `customer` / `driver` / `admin` | Mặc định `customer` |
 | `is_active` | BOOLEAN | Mặc định `true` |
+| `marketing_consent` | BOOLEAN | Mặc định `false` |
+| `failed_login_count` | INTEGER | Số lần đăng nhập sai trong cửa sổ 15 phút hiện tại |
+| `failed_login_started_at` | TIMESTAMPTZ | Thời điểm lần sai đầu tiên của cửa sổ, NULL nếu chưa sai |
+| `locked_until` | TIMESTAMPTZ | Bị khoá đến lúc nào, NULL nếu không bị khoá |
 | `created_at`, `updated_at` | TIMESTAMPTZ | |
+
+### Bảng `sessions` (phiên đăng nhập)
+
+| Cột | Kiểu | Ghi chú |
+|---|---|---|
+| `id` | VARCHAR(64) | Khoá chính – chính là session ID trong cookie |
+| `user_id` | UUID | FK → `users.id`, xoá user thì tự xoá phiên |
+| `created_at` | TIMESTAMPTZ | Lúc đăng nhập |
+| `last_seen_at` | TIMESTAMPTZ | Lần cuối dùng – quá 30 phút thì hết phiên |
 
 ### Xem nhanh bằng psql
 
@@ -372,9 +490,13 @@ COMP1807_PrivateHire/
         ├── db/base.py        # Base của SQLAlchemy
         ├── db/session.py     # kết nối database, get_db()
         ├── models/user.py    # bảng users, UserRole
+        ├── models/session.py # bảng sessions (UserSession)
         ├── schemas/user.py   # kiểm tra dữ liệu vào/ra (RegisterIn, UserOut)
+        ├── schemas/auth.py   # LoginIn, LoginOut
         ├── services/user_service.py  # logic đăng ký
-        └── api/v1/auth.py    # endpoint /auth/...
+        ├── services/auth_service.py  # đăng nhập, khoá tài khoản, tạo/kiểm tra/xoá phiên
+        ├── api/deps.py       # get_current_user: đọc cookie session_id
+        └── api/v1/auth.py    # endpoint /auth/register, /login, /me, /logout
 ```
 
 ---
@@ -404,6 +526,14 @@ COMP1807_PrivateHire/
 | `privatehire_test` không có bảng | Bình thường – test tự xoá bảng sau khi chạy |
 | Swagger trả `422` | Dữ liệu gửi lên sai quy tắc – đọc `msg` trong Response body |
 
+### Đăng nhập (khi thử tay)
+
+| Lỗi | Cách xử lý |
+|---|---|
+| `429 Dang nhap sai qua nhieu lan` | Chờ 15 phút, hoặc mở khoá tay: `psql -U privatehire -h localhost -d privatehire -c "UPDATE users SET locked_until = NULL, failed_login_count = 0;"` |
+| Đăng nhập xong mà `/me` vẫn `401` trên Swagger | Mở Swagger bằng `127.0.0.1` hoặc `localhost` (không dùng IP mạng LAN) – cookie `Secure` chỉ được gửi trên địa chỉ an toàn |
+| `/me` trả `401` sau một lúc không dùng | Bình thường – phiên hết sau 30 phút không hoạt động, đăng nhập lại |
+
 ### Docker (Cách B)
 
 | Lỗi | Cách xử lý |
@@ -411,6 +541,7 @@ COMP1807_PrivateHire/
 | `failed to connect to the docker API ... dockerDesktopLinuxEngine` | Docker Desktop chưa chạy → mở nó, chờ **Engine running** |
 | `required variable POSTGRES_PASSWORD is missing a value` | Chưa có `.env` ở **thư mục gốc** (không phải `backend\.env`) → bước 2.1 |
 | Không thấy container trong Docker Desktop | Lệnh `docker compose up` trước đó bị lỗi → đọc lỗi, sửa, chạy lại |
+| Backend dừng ngay, log báo lỗi ở migration `0002` (`column "username" ... contains null values`) | Database Docker còn user tạo trước khi có username. Xoá dữ liệu Docker: `docker compose down -v` rồi `docker compose up -d --build` |
 | `port is already allocated` | Cổng 8080/5433 đang bị dùng → đổi `BACKEND_PORT` / `DB_PORT` trong `.env` gốc |
 | Backend dừng ngay, log báo `exec ./docker-entrypoint.sh: no such file or directory` | File `.sh` bị đổi sang CRLF. Ở thư mục gốc: `Remove-Item backend\docker-entrypoint.sh; git checkout -- backend/docker-entrypoint.sh` rồi build lại |
 | Backend báo `password authentication failed` | Đổi `POSTGRES_PASSWORD` sau khi volume đã tạo (Postgres chỉ đặt mật khẩu lần đầu). Đổi lại mật khẩu cũ, hoặc `docker compose down -v` (mất dữ liệu Docker) |

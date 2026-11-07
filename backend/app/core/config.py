@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     TEST_DATABASE_URL: str | None = None
 
+    # Khoa tai khoan: sai LOGIN_MAX_FAILURES lan trong LOGIN_LOCK_MINUTES phut -> khoa LOGIN_LOCK_MINUTES phut
+    LOGIN_MAX_FAILURES: int = 5
+    LOGIN_LOCK_MINUTES: int = 15
+
+    # Phien dang nhap: het sau SESSION_IDLE_MINUTES phut khong hoat dong
+    SESSION_IDLE_MINUTES: int = 30
+    # Cookie chi gui qua https (localhost / 127.0.0.1 duoc trinh duyet coi la an toan)
+    SESSION_COOKIE_SECURE: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

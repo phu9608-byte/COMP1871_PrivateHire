@@ -29,7 +29,7 @@ def _schema() -> Iterator[None]:
 def _clean_tables() -> Iterator[None]:
     yield
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))
+        conn.execute(text("TRUNCATE users RESTART IDENTITY CASCADE"))  # xoa ca sessions
 
 
 @pytest.fixture
@@ -38,13 +38,22 @@ def db() -> Iterator[Session]:
         yield session
 
 
+def _get_test_db() -> Iterator[Session]:
+    with TestingSession() as session:
+        yield session
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    def _get_db() -> Iterator[Session]:
-        with TestingSession() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _get_db
-    with TestClient(app) as c:
+    app.dependency_overrides[get_db] = _get_test_db
+    # https: cookie "Secure" chi duoc gui lai qua https
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client2(client) -> Iterator[TestClient]:
+    """Trinh duyet thu hai (cookie rieng) - dung chung app voi `client`."""
+    with TestClient(app, base_url="https://testserver") as c:
+        yield c
