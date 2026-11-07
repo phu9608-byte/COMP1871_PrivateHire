@@ -1,0 +1,3 @@
+# Script chay trong container Linux phai giu xuong dong LF,
+# neu bi Git tren Windows doi sang CRLF thi container khong chay duoc.
+*.sh text eol=lf
