@@ -1,0 +1,9 @@
+# Khong dua vao image: mat khau, moi truong ao, cache, test
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+Dockerfile
+.dockerignore
