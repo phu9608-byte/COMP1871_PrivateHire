@@ -1,1 +1,5 @@
 .env
+
+# File lam viec cua Claude / superpowers (plan, ghi chu) - khong dua len repo
+.superpowers/
+docs/superpowers/

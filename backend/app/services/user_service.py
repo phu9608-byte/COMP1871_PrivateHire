@@ -15,17 +15,25 @@ class PhoneAlreadyExists(Exception):
     pass
 
 
+class UsernameAlreadyExists(Exception):
+    pass
+
+
 def register_user(db: Session, data: RegisterIn) -> User:
+    if db.scalar(select(User.id).where(User.username == data.username)) is not None:
+        raise UsernameAlreadyExists
     if db.scalar(select(User.id).where(User.email == data.email)) is not None:
         raise EmailAlreadyExists
-    if data.phone and db.scalar(select(User.id).where(User.phone == data.phone)) is not None:
+    if db.scalar(select(User.id).where(User.phone == data.phone)) is not None:
         raise PhoneAlreadyExists
 
     user = User(
+        username=data.username,
         email=data.email,
         password_hash=hash_password(data.password),
         full_name=data.full_name,
         phone=data.phone,
+        marketing_consent=data.marketing_consent,
         role=UserRole(data.role),
     )
     db.add(user)
@@ -34,6 +42,8 @@ def register_user(db: Session, data: RegisterIn) -> User:
     except IntegrityError as exc:
         # Hai request dang ky cung luc vuot qua buoc kiem tra o tren
         db.rollback()
+        if "username" in str(exc.orig):
+            raise UsernameAlreadyExists from exc
         if "phone" in str(exc.orig):
             raise PhoneAlreadyExists from exc
         raise EmailAlreadyExists from exc
